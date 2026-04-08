@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'os';
 import path from 'node:path';
@@ -15,11 +15,12 @@ import {
 
 describe('QwenOAuthAccountPool', () => {
   let tempDir: string;
-  let homedirSpy: ReturnType<typeof vi.spyOn>;
+  let originalHome: string | undefined;
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'qwen-oauth-pool-'));
-    homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(tempDir);
+    originalHome = process.env['HOME'];
+    process.env['HOME'] = tempDir;
     delete process.env['QWEN_OAUTH_DAILY_REQUEST_LIMIT'];
     delete process.env['QWEN_OAUTH_ROTATION_THRESHOLD'];
     delete process.env['QWEN_OAUTH_ACCOUNT_ID'];
@@ -27,7 +28,11 @@ describe('QwenOAuthAccountPool', () => {
   });
 
   afterEach(async () => {
-    homedirSpy.mockRestore();
+    if (originalHome) {
+      process.env['HOME'] = originalHome;
+    } else {
+      delete process.env['HOME'];
+    }
     delete process.env['QWEN_OAUTH_ACCOUNT_ID'];
     delete process.env['QWEN_OAUTH_ACCOUNT_INDEX'];
     await fs.rm(tempDir, { recursive: true, force: true });
