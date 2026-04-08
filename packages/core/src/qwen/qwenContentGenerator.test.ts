@@ -1795,5 +1795,68 @@ describe('QwenContentGenerator', () => {
         parentProto.generateContent = originalGenerateContent;
       }
     });
+
+    it('should recover after refresh token invalidation by retrying with the reselected account', async () => {
+      vi.spyOn(QwenOAuthAccountPool.prototype, 'getActiveAccountId')
+        .mockResolvedValueOnce('account-1')
+        .mockResolvedValueOnce('account-2');
+      const initializeSelectionSpy = vi.spyOn(
+        QwenOAuthAccountPool.prototype,
+        'initializeProcessSelection',
+      );
+
+      const tokenManager = SharedTokenManager.getInstance() as unknown as {
+        getValidCredentials: (
+          qwenClient: IQwenOAuth2Client,
+          forceRefresh?: boolean,
+        ) => Promise<QwenCredentials>;
+        clearCache: () => void;
+      };
+      const getValidCredentialsSpy = vi
+        .spyOn(tokenManager, 'getValidCredentials')
+        .mockRejectedValueOnce(
+          new Error(
+            "Refresh token expired or invalid. Please use '/auth' to re-authenticate.",
+          ),
+        )
+        .mockResolvedValueOnce({
+          access_token: 'rotated-token',
+          refresh_token: 'rotated-refresh',
+          token_type: 'Bearer',
+          resource_url: 'https://rotated-endpoint.com',
+          expiry_date: Date.now() + 3600000,
+        });
+
+      const request: GenerateContentParameters = {
+        model: 'qwen-turbo',
+        contents: [{ role: 'user', parts: [{ text: 'Hello' }] }],
+      };
+
+      const parentProto = Object.getPrototypeOf(
+        Object.getPrototypeOf(qwenContentGenerator),
+      ) as {
+        generateContent: (
+          request: GenerateContentParameters,
+          userPromptId: string,
+        ) => Promise<GenerateContentResponse>;
+      };
+      const originalGenerateContent = parentProto.generateContent;
+      parentProto.generateContent = vi
+        .fn()
+        .mockResolvedValue(createMockResponse('Recovered content'));
+
+      try {
+        const result = await qwenContentGenerator.generateContent(
+          request,
+          'test-prompt-id',
+        );
+
+        expect(result.text).toBe('Recovered content');
+        expect(getValidCredentialsSpy).toHaveBeenCalledTimes(2);
+        expect(initializeSelectionSpy).toHaveBeenCalled();
+      } finally {
+        parentProto.generateContent = originalGenerateContent;
+      }
+    });
   });
 });

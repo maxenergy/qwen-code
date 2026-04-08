@@ -111,6 +111,13 @@ export class QwenContentGenerator extends OpenAIContentGenerator {
         accountId: await this.accountPool.getActiveAccountId(),
       };
     } catch (error) {
+      if (this.isCredentialRotationCandidateError(error)) {
+        const rotatedToken = await this.retryAfterCredentialInvalidation();
+        if (rotatedToken) {
+          return rotatedToken;
+        }
+      }
+
       // Propagate auth errors as-is for retry logic
       if (this.isAuthError(error)) {
         throw error;
@@ -177,7 +184,21 @@ export class QwenContentGenerator extends OpenAIContentGenerator {
       if (this.isAuthError(error)) {
         // Use SharedTokenManager to properly refresh and persist the token
         // This ensures the refreshed token is saved to oauth_creds.json
-        await this.sharedManager.getValidCredentials(this.qwenClient, true);
+        try {
+          await this.sharedManager.getValidCredentials(this.qwenClient, true);
+        } catch (refreshError) {
+          if (this.isCredentialRotationCandidateError(refreshError)) {
+            const rotatedToken = await this.retryAfterCredentialInvalidation();
+            if (rotatedToken) {
+              this.pipeline.client.apiKey = rotatedToken.token;
+              this.pipeline.client.baseURL = rotatedToken.endpoint;
+            } else {
+              throw refreshError;
+            }
+          } else {
+            throw refreshError;
+          }
+        }
         const retryResult = await attemptOperation();
         await this.accountPool.recordSuccessfulRequest(
           retryResult.accountId || undefined,
@@ -264,6 +285,53 @@ export class QwenContentGenerator extends OpenAIContentGenerator {
       errorMessage.includes('access denied') ||
       (errorMessage.includes('token') && errorMessage.includes('expired'))
     );
+  }
+
+  private isCredentialRotationCandidateError(error: unknown): boolean {
+    if (!error) {
+      return false;
+    }
+
+    const errorMessage =
+      error instanceof Error
+        ? error.message.toLowerCase()
+        : String(error).toLowerCase();
+
+    return (
+      errorMessage.includes('refresh token expired or invalid') ||
+      (errorMessage.includes('refresh token') &&
+        errorMessage.includes('re-authenticate'))
+    );
+  }
+
+  private async retryAfterCredentialInvalidation(): Promise<{
+    token: string;
+    endpoint: string;
+    accountId: string | null;
+  } | null> {
+    try {
+      this.sharedManager.clearCache();
+      await this.accountPool.initializeProcessSelection();
+      const credentials = await this.sharedManager.getValidCredentials(
+        this.qwenClient,
+      );
+
+      if (!credentials.access_token) {
+        return null;
+      }
+
+      return {
+        token: credentials.access_token,
+        endpoint: this.getCurrentEndpoint(credentials.resource_url),
+        accountId: await this.accountPool.getActiveAccountId(),
+      };
+    } catch (retryError) {
+      this.debugLogger.warn(
+        'Failed to recover from invalid refresh token by reloading the selected account:',
+        retryError,
+      );
+      return null;
+    }
   }
 
   /**
