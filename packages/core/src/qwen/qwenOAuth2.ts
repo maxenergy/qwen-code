@@ -33,6 +33,7 @@ const QWEN_OAUTH_CLIENT_ID = 'f0304373b74a44d2b584a3fb70ca9e56';
 const QWEN_OAUTH_SCOPE = 'openid profile email model.completion';
 const QWEN_OAUTH_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code';
 const QWEN_OAUTH_BROWSER_RELAUNCH_DELAY_MS = 8000;
+const QWEN_OAUTH_MAX_BROWSER_RELAUNCHES = 3;
 
 /**
  * PKCE (Proof Key for Code Exchange) utilities
@@ -687,7 +688,7 @@ async function authWithQwenDeviceFlow(
   config: Config,
 ): Promise<AuthResult> {
   let isCancelled = false;
-  let browserRelaunched = false;
+  let browserRelaunchCount = 0;
   let totalPollingWaitMs = 0;
 
   // Set up cancellation listener
@@ -887,11 +888,12 @@ async function authWithQwenDeviceFlow(
           totalPollingWaitMs += pollInterval;
 
           if (
-            !browserRelaunched &&
             !config.isBrowserLaunchSuppressed() &&
-            totalPollingWaitMs >= QWEN_OAUTH_BROWSER_RELAUNCH_DELAY_MS
+            browserRelaunchCount < QWEN_OAUTH_MAX_BROWSER_RELAUNCHES &&
+            totalPollingWaitMs >=
+              QWEN_OAUTH_BROWSER_RELAUNCH_DELAY_MS * (browserRelaunchCount + 1)
           ) {
-            browserRelaunched = true;
+            browserRelaunchCount += 1;
             emitAuthProgress(
               'polling',
               'Still waiting for authorization. Re-opening the browser to continue the OAuth flow.',
