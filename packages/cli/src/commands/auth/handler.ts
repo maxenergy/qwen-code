@@ -9,6 +9,7 @@ import {
   getErrorMessage,
   type Config,
   type ProviderModelConfig as ModelConfig,
+  QwenOAuthAccountPool,
 } from '@qwen-code/qwen-code-core';
 import { writeStdoutLine, writeStderrLine } from '../../utils/stdioHelpers.js';
 import { t } from '../../i18n/index.js';
@@ -61,6 +62,7 @@ export async function handleQwenAuth(
 
     // Create a minimal argv for config loading
     const minimalArgv: CliArgs = {
+      accountIndex: undefined,
       query: undefined,
       model: undefined,
       sandbox: undefined,
@@ -145,6 +147,8 @@ async function handleQwenOAuth(
 
   try {
     await config.refreshAuth(AuthType.QWEN_OAUTH);
+    const accountPool = new QwenOAuthAccountPool();
+    const accounts = await accountPool.getAccounts();
 
     // Persist the auth type
     const authTypeScope = getPersistScopeForModelSelection(settings);
@@ -155,6 +159,11 @@ async function handleQwenOAuth(
     );
 
     writeStdoutLine(t('Successfully authenticated with Qwen OAuth.'));
+    writeStdoutLine(
+      t('Saved Qwen OAuth accounts: {{count}}', {
+        count: String(accounts.length),
+      }),
+    );
     process.exit(0);
   } catch (error) {
     writeStderrLine(
@@ -427,9 +436,14 @@ export async function showAuthStatus(): Promise<void> {
 
     // Display status based on auth type
     if (selectedType === AuthType.QWEN_OAUTH) {
+      const accountPool = new QwenOAuthAccountPool();
+      const accounts = await accountPool.getAccounts();
       writeStdoutLine(t('✓ Authentication Method: Qwen OAuth'));
       writeStdoutLine(t('  Type: Free tier'));
       writeStdoutLine(t('  Limit: Up to 1,000 requests/day'));
+      writeStdoutLine(
+        t('  Saved Accounts: {{count}}', { count: String(accounts.length) }),
+      );
       writeStdoutLine(t('  Models: Qwen latest models\n'));
     } else if (selectedType === AuthType.USE_OPENAI) {
       // Check for Coding Plan configuration

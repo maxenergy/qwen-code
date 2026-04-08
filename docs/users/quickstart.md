@@ -75,6 +75,8 @@ Select `Qwen OAuth`, log in to your account and follow the prompts to confirm. O
 > [!tip]
 >
 > You can also configure authentication directly from the terminal without starting a session by running `qwen auth`. Use `qwen auth status` to check your current configuration at any time. See the [Authentication](./configuration/auth) page for details.
+>
+> If you use multiple Qwen OAuth accounts, see [Qwen OAuth Multi-Account](./configuration/qwen-oauth-multi-account) for `/accounts`, `qwen accounts`, and `--account-index`.
 
 ## Step 3: Start your first session
 
@@ -213,20 +215,24 @@ review my changes and suggest improvements
 
 Here are the most important commands for daily use:
 
-| Command               | What it does                                     | Example                       |
-| --------------------- | ------------------------------------------------ | ----------------------------- |
-| `qwen`                | start Qwen Code                                  | `qwen`                        |
-| `/auth`               | Change authentication method (in session)        | `/auth`                       |
-| `qwen auth`           | Configure authentication from the terminal       | `qwen auth`                   |
-| `qwen auth status`    | Check current authentication status              | `qwen auth status`            |
-| `/help`               | Display help information for available commands  | `/help` or `/?`               |
-| `/compress`           | Replace chat history with summary to save Tokens | `/compress`                   |
-| `/clear`              | Clear terminal screen content                    | `/clear` (shortcut: `Ctrl+L`) |
-| `/theme`              | Change Qwen Code visual theme                    | `/theme`                      |
-| `/language`           | View or change language settings                 | `/language`                   |
-| → `ui [language]`     | Set UI interface language                        | `/language ui zh-CN`          |
-| → `output [language]` | Set LLM output language                          | `/language output Chinese`    |
-| `/quit`               | Exit Qwen Code immediately                       | `/quit` or `/exit`            |
+| Command                | What it does                                     | Example                       |
+| ---------------------- | ------------------------------------------------ | ----------------------------- |
+| `qwen`                 | start Qwen Code                                  | `qwen`                        |
+| `/auth`                | Change authentication method (in session)        | `/auth`                       |
+| `/accounts`            | List or switch saved Qwen OAuth accounts         | `/accounts 2`                 |
+| `qwen auth`            | Configure authentication from the terminal       | `qwen auth`                   |
+| `qwen accounts list`   | List saved Qwen OAuth accounts                   | `qwen accounts list`          |
+| `qwen accounts switch` | Set the default saved Qwen OAuth account         | `qwen accounts switch 2`      |
+| `qwen --account-index` | Start this process from a specific account index | `qwen --account-index 2`      |
+| `qwen auth status`     | Check current authentication status              | `qwen auth status`            |
+| `/help`                | Display help information for available commands  | `/help` or `/?`               |
+| `/compress`            | Replace chat history with summary to save Tokens | `/compress`                   |
+| `/clear`               | Clear terminal screen content                    | `/clear` (shortcut: `Ctrl+L`) |
+| `/theme`               | Change Qwen Code visual theme                    | `/theme`                      |
+| `/language`            | View or change language settings                 | `/language`                   |
+| → `ui [language]`      | Set UI interface language                        | `/language ui zh-CN`          |
+| → `output [language]`  | Set LLM output language                          | `/language output Chinese`    |
+| `/quit`                | Exit Qwen Code immediately                       | `/quit` or `/exit`            |
 
 See the [CLI reference](./features/commands) for a complete list of commands.
 

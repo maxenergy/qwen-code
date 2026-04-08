@@ -257,6 +257,8 @@ export * from './utils/yaml-parser.js';
 // ============================================================================
 
 export * from './qwen/qwenOAuth2.js';
+export * from './qwen/qwenOAuthAccountPool.js';
+export * from './qwen/sharedTokenManager.js';
 
 // ============================================================================
 // Testing Utilities

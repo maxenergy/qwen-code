@@ -18,6 +18,7 @@ import type {
 import { FinishReason } from '@google/genai';
 import { QwenContentGenerator } from './qwenContentGenerator.js';
 import { SharedTokenManager } from './sharedTokenManager.js';
+import { QwenOAuthAccountPool } from './qwenOAuthAccountPool.js';
 import type { Config } from '../config/config.js';
 import { AuthType } from '../core/contentGenerator.js';
 
@@ -213,6 +214,30 @@ vi.mock('./sharedTokenManager.js', () => ({
     setMockError(error: Error | null): void {
       this.shouldThrowError = !!error;
       this.errorToThrow = error;
+    }
+  },
+}));
+
+vi.mock('./qwenOAuthAccountPool.js', () => ({
+  QwenOAuthAccountPool: class {
+    async initializeProcessSelection() {
+      return null;
+    }
+
+    async rotateActiveAccountIfNeeded() {
+      return null;
+    }
+
+    async getActiveAccountId() {
+      return 'account-1';
+    }
+
+    async recordSuccessfulRequest(_accountId?: string) {}
+
+    async markQuotaExceeded(_accountId?: string) {}
+
+    async rotateToNextAvailableAccount(_excludeAccountId?: string) {
+      return null;
     }
   },
 }));
@@ -1693,6 +1718,82 @@ describe('QwenContentGenerator', () => {
       expect(countResult.totalTokens).toBe(15);
 
       SharedTokenManager.getInstance = originalGetInstance;
+    });
+
+    it('should rotate to the next account when the active account quota is exhausted', async () => {
+      const quotaError = Object.assign(
+        new Error('Free allocated quota exceeded.'),
+        {
+          status: 429,
+          code: 'insufficient_quota',
+        },
+      );
+
+      vi.spyOn(QwenOAuthAccountPool.prototype, 'getActiveAccountId')
+        .mockResolvedValueOnce('account-1')
+        .mockResolvedValueOnce('account-1')
+        .mockResolvedValueOnce('account-2');
+      const markQuotaExceededSpy = vi.spyOn(
+        QwenOAuthAccountPool.prototype,
+        'markQuotaExceeded',
+      );
+      const rotateSpy = vi
+        .spyOn(QwenOAuthAccountPool.prototype, 'rotateToNextAvailableAccount')
+        .mockResolvedValue({
+          accountId: 'account-2',
+          label: 'qwen-account-2',
+          access_token: 'rotated-token',
+          refresh_token: 'rotated-refresh-token',
+          resource_url: 'https://rotated-endpoint.com',
+          createdAt: Date.now(),
+          lastAuthenticatedAt: Date.now(),
+          usage: {
+            date: '2026-04-08',
+            successfulRequests: 0,
+          },
+        });
+      const recordSpy = vi.spyOn(
+        QwenOAuthAccountPool.prototype,
+        'recordSuccessfulRequest',
+      );
+
+      vi.mocked(mockQwenClient.getAccessToken).mockResolvedValue({
+        token: 'valid-token',
+      });
+      vi.mocked(mockQwenClient.getCredentials).mockReturnValue(mockCredentials);
+
+      const parentProto = Object.getPrototypeOf(
+        Object.getPrototypeOf(qwenContentGenerator),
+      ) as {
+        generateContent: (
+          request: GenerateContentParameters,
+          userPromptId: string,
+        ) => Promise<GenerateContentResponse>;
+      };
+      const originalGenerateContent = parentProto.generateContent;
+      parentProto.generateContent = vi
+        .fn()
+        .mockRejectedValueOnce(quotaError)
+        .mockResolvedValueOnce(createMockResponse('Rotated content'));
+
+      try {
+        const request: GenerateContentParameters = {
+          model: 'qwen-turbo',
+          contents: [{ role: 'user', parts: [{ text: 'Hello' }] }],
+        };
+
+        const result = await qwenContentGenerator.generateContent(
+          request,
+          'test-prompt-id',
+        );
+
+        expect(result.text).toBe('Rotated content');
+        expect(markQuotaExceededSpy).toHaveBeenCalledWith('account-1');
+        expect(rotateSpy).toHaveBeenCalledWith('account-1');
+        expect(recordSpy).toHaveBeenCalledWith('account-2');
+      } finally {
+        parentProto.generateContent = originalGenerateContent;
+      }
     });
   });
 });

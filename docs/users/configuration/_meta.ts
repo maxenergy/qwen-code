@@ -1,6 +1,7 @@
 export default {
   settings: 'Settings',
   auth: 'Authentication',
+  'qwen-oauth-multi-account': 'Qwen OAuth Multi-Account',
   memory: {
     display: 'hidden',
   },

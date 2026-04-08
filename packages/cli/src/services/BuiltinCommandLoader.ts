@@ -8,6 +8,7 @@ import type { ICommandLoader } from './types.js';
 import type { SlashCommand } from '../ui/commands/types.js';
 import type { Config } from '@qwen-code/qwen-code-core';
 import { aboutCommand } from '../ui/commands/aboutCommand.js';
+import { accountsCommand } from '../ui/commands/accountsCommand.js';
 import { agentsCommand } from '../ui/commands/agentsCommand.js';
 import { arenaCommand } from '../ui/commands/arenaCommand.js';
 import { approvalModeCommand } from '../ui/commands/approvalModeCommand.js';
@@ -80,6 +81,7 @@ export class BuiltinCommandLoader implements ICommandLoader {
 
     const allDefinitions: Array<SlashCommand | null> = [
       aboutCommand,
+      accountsCommand,
       agentsCommand,
       arenaCommand,
       approvalModeCommand,

@@ -20,6 +20,8 @@ import type {
 import type { ContentGeneratorConfig } from '../core/contentGenerator.js';
 import { DEFAULT_DASHSCOPE_BASE_URL } from '../core/openaiContentGenerator/constants.js';
 import { createDebugLogger } from '../utils/debugLogger.js';
+import { isQwenQuotaExceededError } from '../utils/quotaErrorDetection.js';
+import { QwenOAuthAccountPool } from './qwenOAuthAccountPool.js';
 
 /**
  * Qwen Content Generator that uses Qwen OAuth tokens with automatic refresh
@@ -29,6 +31,7 @@ export class QwenContentGenerator extends OpenAIContentGenerator {
   private qwenClient: IQwenOAuth2Client;
   private sharedManager: SharedTokenManager;
   private currentToken?: string;
+  private accountPool: QwenOAuthAccountPool;
 
   constructor(
     qwenClient: IQwenOAuth2Client,
@@ -45,6 +48,7 @@ export class QwenContentGenerator extends OpenAIContentGenerator {
     super(contentGeneratorConfig, cliConfig, dashscopeProvider);
     this.qwenClient = qwenClient;
     this.sharedManager = SharedTokenManager.getInstance();
+    this.accountPool = new QwenOAuthAccountPool();
 
     // Set default base URL, will be updated dynamically
     if (contentGeneratorConfig?.baseUrl && contentGeneratorConfig?.apiKey) {
@@ -84,8 +88,14 @@ export class QwenContentGenerator extends OpenAIContentGenerator {
   /**
    * Get valid token and endpoint using the shared token manager
    */
-  private async getValidToken(): Promise<{ token: string; endpoint: string }> {
+  private async getValidToken(): Promise<{
+    token: string;
+    endpoint: string;
+    accountId: string | null;
+  }> {
     try {
+      await this.accountPool.initializeProcessSelection();
+      await this.accountPool.rotateActiveAccountIfNeeded();
       // Use SharedTokenManager for consistent token/endpoint pairing and automatic refresh
       const credentials = await this.sharedManager.getValidCredentials(
         this.qwenClient,
@@ -98,6 +108,7 @@ export class QwenContentGenerator extends OpenAIContentGenerator {
       return {
         token: credentials.access_token,
         endpoint: this.getCurrentEndpoint(credentials.resource_url),
+        accountId: await this.accountPool.getActiveAccountId(),
       };
     } catch (error) {
       // Propagate auth errors as-is for retry logic
@@ -125,25 +136,53 @@ export class QwenContentGenerator extends OpenAIContentGenerator {
     operation: () => Promise<T>,
   ): Promise<T> {
     // Attempt the operation with credential management and retry logic
-    const attemptOperation = async (): Promise<T> => {
-      const { token, endpoint } = await this.getValidToken();
+    const attemptOperation = async (): Promise<{
+      result: T;
+      accountId: string | null;
+    }> => {
+      const { token, endpoint, accountId } = await this.getValidToken();
 
       // Apply dynamic configuration
       this.pipeline.client.apiKey = token;
       this.pipeline.client.baseURL = endpoint;
 
-      return await operation();
+      return {
+        result: await operation(),
+        accountId,
+      };
     };
 
     // Execute with retry logic for auth errors
     try {
-      return await attemptOperation();
+      const { result, accountId } = await attemptOperation();
+      await this.accountPool.recordSuccessfulRequest(accountId || undefined);
+      return result;
     } catch (error) {
+      if (isQwenQuotaExceededError(error)) {
+        const accountId = await this.accountPool.getActiveAccountId();
+        await this.accountPool.markQuotaExceeded(accountId || undefined);
+        const rotated = await this.accountPool.rotateToNextAvailableAccount(
+          accountId || undefined,
+        );
+        if (rotated) {
+          this.sharedManager.clearCache();
+          const retryResult = await attemptOperation();
+          await this.accountPool.recordSuccessfulRequest(
+            retryResult.accountId || undefined,
+          );
+          return retryResult.result;
+        }
+      }
+
       if (this.isAuthError(error)) {
         // Use SharedTokenManager to properly refresh and persist the token
         // This ensures the refreshed token is saved to oauth_creds.json
         await this.sharedManager.getValidCredentials(this.qwenClient, true);
-        return await attemptOperation();
+        const retryResult = await attemptOperation();
+        await this.accountPool.recordSuccessfulRequest(
+          retryResult.accountId || undefined,
+        );
+        return retryResult.result;
       }
       throw error;
     }

@@ -5,9 +5,6 @@
  */
 
 import crypto from 'crypto';
-import path from 'node:path';
-import { promises as fs } from 'node:fs';
-import * as os from 'os';
 
 import open from 'open';
 import { EventEmitter } from 'events';
@@ -20,6 +17,7 @@ import {
   TokenManagerError,
   TokenError,
 } from './sharedTokenManager.js';
+import { QwenOAuthAccountPool } from './qwenOAuthAccountPool.js';
 
 const debugLogger = createDebugLogger('QWEN_OAUTH');
 
@@ -34,10 +32,6 @@ const QWEN_OAUTH_CLIENT_ID = 'f0304373b74a44d2b584a3fb70ca9e56';
 
 const QWEN_OAUTH_SCOPE = 'openid profile email model.completion';
 const QWEN_OAUTH_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code';
-
-// File System Configuration
-const QWEN_DIR = '.qwen';
-const QWEN_CREDENTIAL_FILENAME = 'oauth_creds.json';
 
 /**
  * PKCE (Proof Key for Code Exchange) utilities
@@ -490,16 +484,28 @@ export async function getQwenOAuthClient(
   options?: { requireCachedCredentials?: boolean },
 ): Promise<QwenOAuth2Client> {
   const client = new QwenOAuth2Client();
+  const accountPool = new QwenOAuthAccountPool();
 
   // Use shared token manager to get valid credentials with cross-session synchronization
   const sharedManager = SharedTokenManager.getInstance();
+  await accountPool.initializeProcessSelection();
+  await accountPool.ensureActiveAccountMirrored();
 
   try {
+    await accountPool.rotateActiveAccountIfNeeded();
     // Try to get valid credentials from shared cache first
     const credentials = await sharedManager.getValidCredentials(client);
     client.setCredentials(credentials);
     return client;
   } catch (error: unknown) {
+    const rotatedAccount = await accountPool.rotateToNextAvailableAccount();
+    if (rotatedAccount) {
+      sharedManager.clearCache();
+      const credentials = await sharedManager.getValidCredentials(client);
+      client.setCredentials(credentials);
+      return client;
+    }
+
     // Handle specific token manager errors
     if (error instanceof TokenManagerError) {
       switch (error.type) {
@@ -952,13 +958,12 @@ async function authWithQwenDeviceFlow(
 }
 
 async function cacheQwenCredentials(credentials: QwenCredentials) {
-  const filePath = getQwenCachedCredentialPath();
   try {
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-
-    const credString = JSON.stringify(credentials, null, 2);
-    await fs.writeFile(filePath, credString);
+    const accountPool = new QwenOAuthAccountPool();
+    await accountPool.upsertAuthenticatedAccount(credentials);
   } catch (error: unknown) {
+    const accountPool = new QwenOAuthAccountPool();
+    const filePath = accountPool.getPoolFilePath();
     // Handle file system errors (e.g., EACCES permission denied)
     const errorMessage = error instanceof Error ? error.message : String(error);
     const errorCode =
@@ -974,7 +979,7 @@ async function cacheQwenCredentials(credentials: QwenCredentials) {
 
     // Throw error for other file system failures
     throw new Error(
-      `Failed to cache credentials: error when creating folder \`${path.dirname(filePath)}\` and writing to \`${filePath}\`. ${errorMessage}. Please check permissions.`,
+      `Failed to cache credentials: error when updating \`${filePath}\`. ${errorMessage}. Please check permissions.`,
     );
   }
 }
@@ -985,8 +990,8 @@ async function cacheQwenCredentials(credentials: QwenCredentials) {
  */
 export async function clearQwenCredentials(): Promise<void> {
   try {
-    const filePath = getQwenCachedCredentialPath();
-    await fs.unlink(filePath);
+    const accountPool = new QwenOAuthAccountPool();
+    await accountPool.removeActiveAccount();
     debugLogger.debug('Cached Qwen credentials cleared successfully.');
   } catch (error: unknown) {
     // If file doesn't exist or can't be deleted, we consider it cleared
@@ -1009,9 +1014,4 @@ export async function clearQwenCredentials(): Promise<void> {
     }
   }
 }
-
-function getQwenCachedCredentialPath(): string {
-  return path.join(os.homedir(), QWEN_DIR, QWEN_CREDENTIAL_FILENAME);
-}
-
 export const clearCachedCredentialFile = clearQwenCredentials;

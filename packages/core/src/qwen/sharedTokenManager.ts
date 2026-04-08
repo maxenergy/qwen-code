@@ -6,7 +6,6 @@
 
 import path from 'node:path';
 import { promises as fs, unlinkSync } from 'node:fs';
-import * as os from 'os';
 import { randomUUID } from 'node:crypto';
 
 import type { IQwenOAuth2Client } from './qwenOAuth2.js';
@@ -18,13 +17,10 @@ import {
   CredentialsClearRequiredError,
 } from './qwenOAuth2.js';
 import { createDebugLogger } from '../utils/debugLogger.js';
+import { QwenOAuthAccountPool } from './qwenOAuthAccountPool.js';
 
 const debugLogger = createDebugLogger('QWEN_OAUTH');
-
-// File System Configuration
-const QWEN_DIR = '.qwen';
-const QWEN_CREDENTIAL_FILENAME = 'oauth_creds.json';
-const QWEN_LOCK_FILENAME = 'oauth_creds.lock';
+const accountPool = new QwenOAuthAccountPool();
 
 // Token and Cache Configuration
 const TOKEN_REFRESH_BUFFER_MS = 30 * 1000; // 30 seconds
@@ -691,7 +687,7 @@ export class SharedTokenManager {
    * @returns The absolute path to the credentials file
    */
   private getCredentialFilePath(): string {
-    return path.join(os.homedir(), QWEN_DIR, QWEN_CREDENTIAL_FILENAME);
+    return accountPool.getSelectedAccountCredentialsPath();
   }
 
   /**
@@ -700,7 +696,7 @@ export class SharedTokenManager {
    * @returns The absolute path to the lock file
    */
   private getLockFilePath(): string {
-    return path.join(os.homedir(), QWEN_DIR, QWEN_LOCK_FILENAME);
+    return accountPool.getSelectedAccountLockPath();
   }
 
   /**

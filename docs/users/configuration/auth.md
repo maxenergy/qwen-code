@@ -27,6 +27,8 @@ Or authenticate directly without starting a session:
 qwen auth qwen-oauth
 ```
 
+If you want to save multiple Qwen OAuth accounts and rotate between them automatically, see [Qwen OAuth Multi-Account](./qwen-oauth-multi-account).
+
 > [!note]
 >
 > In non-interactive or headless environments (e.g., CI, SSH, containers), you typically **cannot** complete the OAuth browser login flow.  

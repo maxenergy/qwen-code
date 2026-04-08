@@ -8,6 +8,7 @@ import {
   InputFormat,
   isDebugLoggingDegraded,
   logUserPrompt,
+  QwenOAuthAccountPool,
   Storage,
   type Config,
   createDebugLogger,
@@ -215,6 +216,21 @@ export async function main() {
   await cleanupCheckpoints();
 
   let argv = await parseArguments();
+
+  if (argv.accountIndex !== undefined) {
+    QwenOAuthAccountPool.setProcessSelectedAccountIndex(argv.accountIndex);
+    const accountPool = new QwenOAuthAccountPool();
+    const availableAccounts = await accountPool.getAccounts();
+    if (
+      availableAccounts.length > 0 &&
+      !(await accountPool.switchProcessAccountByIndex(argv.accountIndex))
+    ) {
+      writeStderrLine(
+        `Error: --account-index=${argv.accountIndex} is out of range. You currently have ${availableAccounts.length} saved Qwen OAuth account(s).`,
+      );
+      process.exit(1);
+    }
+  }
 
   // Check for invalid input combinations early to prevent crashes
   if (argv.promptInteractive && !process.stdin.isTTY) {

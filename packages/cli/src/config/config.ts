@@ -52,6 +52,7 @@ import { loadSandboxConfig } from './sandboxConfig.js';
 import { appEvents } from '../utils/events.js';
 import { mcpCommand } from '../commands/mcp.js';
 import { channelCommand } from '../commands/channel.js';
+import { accountsCommand } from '../commands/accounts.js';
 
 // UUID v4 regex pattern for validation
 const SESSION_ID_REGEX =
@@ -106,6 +107,7 @@ function parseApprovalModeValue(value: string): ApprovalMode {
 }
 
 export interface CliArgs {
+  accountIndex?: number | undefined;
   query: string | undefined;
   model: string | undefined;
   sandbox: boolean | string | undefined;
@@ -281,6 +283,11 @@ export async function parseArguments(): Promise<CliArgs> {
           alias: 'm',
           type: 'string',
           description: `Model`,
+        })
+        .option('account-index', {
+          type: 'number',
+          description:
+            'Start this process from the specified saved Qwen OAuth account index (1-based).',
         })
         .option('prompt', {
           alias: 'p',
@@ -586,7 +593,9 @@ export async function parseArguments(): Promise<CliArgs> {
     // Register Hooks subcommands
     .command(hooksCommand)
     // Register Channel subcommands
-    .command(channelCommand);
+    .command(channelCommand)
+    // Register Accounts subcommands
+    .command(accountsCommand);
 
   yargsInstance
     .version(await getCliVersion()) // This will enable the --version flag based on package.json
@@ -608,7 +617,8 @@ export async function parseArguments(): Promise<CliArgs> {
     (result._[0] === 'mcp' ||
       result._[0] === 'extensions' ||
       result._[0] === 'hooks' ||
-      result._[0] === 'channel')
+      result._[0] === 'channel' ||
+      result._[0] === 'accounts')
   ) {
     // MCP/Extensions/Hooks commands handle their own execution and process exit
     process.exit(0);

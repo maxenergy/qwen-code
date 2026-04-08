@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { promises as fs } from 'node:fs';
-import * as os from 'os';
-import * as path from 'path';
 import { BaseWebSearchProvider } from '../base-provider.js';
 import type {
   WebSearchResult,
@@ -14,6 +11,7 @@ import type {
   DashScopeProviderConfig,
 } from '../types.js';
 import type { QwenCredentials } from '../../../qwen/qwenOAuth2.js';
+import { QwenOAuthAccountPool } from '../../../qwen/qwenOAuthAccountPool.js';
 
 interface DashScopeSearchItem {
   _id: string;
@@ -58,28 +56,22 @@ interface DashScopeSearchResponse {
   success: boolean;
 }
 
-// File System Configuration
-const QWEN_DIR = '.qwen';
-const QWEN_CREDENTIAL_FILENAME = 'oauth_creds.json';
+const accountPool = new QwenOAuthAccountPool();
 
-/**
- * Get the path to the cached OAuth credentials file.
- */
-function getQwenCachedCredentialPath(): string {
-  return path.join(os.homedir(), QWEN_DIR, QWEN_CREDENTIAL_FILENAME);
-}
-
-/**
- * Load cached Qwen OAuth credentials from disk.
- */
 async function loadQwenCredentials(): Promise<QwenCredentials | null> {
-  try {
-    const keyFile = getQwenCachedCredentialPath();
-    const creds = await fs.readFile(keyFile, 'utf-8');
-    return JSON.parse(creds) as QwenCredentials;
-  } catch {
+  await accountPool.initializeProcessSelection();
+  const account = await accountPool.getActiveAccount();
+  if (!account) {
     return null;
   }
+  return {
+    access_token: account.access_token,
+    refresh_token: account.refresh_token,
+    id_token: account.id_token,
+    expiry_date: account.expiry_date,
+    token_type: account.token_type,
+    resource_url: account.resource_url,
+  };
 }
 
 /**
