@@ -1347,6 +1347,71 @@ describe('authWithQwenDeviceFlow - Comprehensive Testing', () => {
     expect(client).toBeInstanceOf(Object);
   });
 
+  it('should re-open the browser once if authorization is still pending', async () => {
+    const { promises: fs } = await import('node:fs');
+    vi.mocked(fs.readFile).mockRejectedValue(
+      new Error('No cached credentials'),
+    );
+
+    const open = await import('open');
+    const openSpy = vi.mocked(open.default);
+
+    const mockAuthResponse = {
+      ok: true,
+      json: async () => ({
+        device_code: 'test-device-code',
+        user_code: 'TEST123',
+        verification_uri: 'https://chat.qwen.ai/device',
+        verification_uri_complete: 'https://chat.qwen.ai/device?code=TEST123',
+        expires_in: 1800,
+      }),
+    };
+
+    const mockPendingResponse = {
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: async () =>
+        JSON.stringify({
+          error: 'authorization_pending',
+          error_description: 'Waiting for user approval',
+        }),
+    };
+
+    const mockTokenResponse = {
+      ok: true,
+      json: async () => ({
+        access_token: 'new-access-token',
+        refresh_token: 'new-refresh-token',
+        token_type: 'Bearer',
+        expires_in: 3600,
+        scope: 'openid profile email model.completion',
+      }),
+    };
+
+    vi.mocked(global.fetch)
+      .mockResolvedValueOnce(mockAuthResponse as Response)
+      .mockResolvedValueOnce(mockPendingResponse as Response)
+      .mockResolvedValueOnce(mockPendingResponse as Response)
+      .mockResolvedValueOnce(mockPendingResponse as Response)
+      .mockResolvedValueOnce(mockPendingResponse as Response)
+      .mockResolvedValueOnce(mockTokenResponse as Response);
+
+    const clientPromise = import('./qwenOAuth2.js').then((module) =>
+      module.getQwenOAuthClient(mockConfig, { forceDeviceAuth: true }),
+    );
+
+    await vi.advanceTimersByTimeAsync(9000);
+
+    const client = await clientPromise;
+
+    expect(client).toBeInstanceOf(Object);
+    expect(openSpy).toHaveBeenCalledTimes(2);
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://chat.qwen.ai/device?code=TEST123',
+    );
+  });
+
   it('should handle 401 error during token polling', async () => {
     const { promises: fs } = await import('node:fs');
     vi.mocked(fs.readFile).mockRejectedValue(
