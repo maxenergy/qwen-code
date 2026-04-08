@@ -7,6 +7,7 @@
 import {
   AuthType,
   getErrorMessage,
+  getQwenOAuthClient,
   type Config,
   type ProviderModelConfig as ModelConfig,
   QwenOAuthAccountPool,
@@ -146,7 +147,7 @@ async function handleQwenOAuth(
   writeStdoutLine(t('Starting Qwen OAuth authentication...'));
 
   try {
-    await config.refreshAuth(AuthType.QWEN_OAUTH);
+    await getQwenOAuthClient(config, { forceDeviceAuth: true });
     const accountPool = new QwenOAuthAccountPool();
     const accounts = await accountPool.getAccounts();
 

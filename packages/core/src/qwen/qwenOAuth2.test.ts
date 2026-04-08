@@ -842,6 +842,66 @@ describe('getQwenOAuthClient', () => {
     SharedTokenManager.getInstance = originalGetInstance;
   });
 
+  it('should start device flow when forceDeviceAuth is true even with cached credentials', async () => {
+    const mockCredentials = {
+      access_token: 'cached-token',
+      refresh_token: 'cached-refresh',
+      token_type: 'Bearer',
+      expiry_date: Date.now() + 3600000,
+    };
+
+    const mockTokenManager = {
+      getValidCredentials: vi.fn().mockResolvedValue(mockCredentials),
+      clearCache: vi.fn(),
+    };
+
+    const originalGetInstance = SharedTokenManager.getInstance;
+    SharedTokenManager.getInstance = vi.fn().mockReturnValue(mockTokenManager);
+
+    const mockAuthResponse = {
+      ok: true,
+      json: async () => ({
+        device_code: 'test-device-code',
+        user_code: 'TEST123',
+        verification_uri: 'https://chat.qwen.ai/device',
+        verification_uri_complete: 'https://chat.qwen.ai/device?code=TEST123',
+        expires_in: 1800,
+      }),
+    };
+
+    const mockTokenResponse = {
+      ok: true,
+      json: async () => ({
+        access_token: 'new-token',
+        refresh_token: 'new-refresh',
+        token_type: 'Bearer',
+        expires_in: 3600,
+      }),
+    };
+
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(mockAuthResponse as Response)
+      .mockResolvedValueOnce(mockTokenResponse as Response);
+
+    const openModule = await import('open');
+    const openSpy = vi.mocked(openModule.default);
+
+    await import('./qwenOAuth2.js').then((module) =>
+      module.getQwenOAuthClient(mockConfig, {
+        forceDeviceAuth: true,
+      }),
+    );
+
+    expect(mockTokenManager.getValidCredentials).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://chat.qwen.ai/device?code=TEST123',
+    );
+
+    SharedTokenManager.getInstance = originalGetInstance;
+  });
+
   it('should include troubleshooting hints when device auth fetch fails', async () => {
     // Make SharedTokenManager fail so we hit the fallback device-flow path
     const mockTokenManager = {

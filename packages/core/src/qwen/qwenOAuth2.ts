@@ -481,7 +481,10 @@ export const qwenOAuth2Events = new EventEmitter();
 
 export async function getQwenOAuthClient(
   config: Config,
-  options?: { requireCachedCredentials?: boolean },
+  options?: {
+    requireCachedCredentials?: boolean;
+    forceDeviceAuth?: boolean;
+  },
 ): Promise<QwenOAuth2Client> {
   const client = new QwenOAuth2Client();
   const accountPool = new QwenOAuthAccountPool();
@@ -491,86 +494,88 @@ export async function getQwenOAuthClient(
   await accountPool.initializeProcessSelection();
   await accountPool.ensureActiveAccountMirrored();
 
-  try {
-    await accountPool.rotateActiveAccountIfNeeded();
-    // Try to get valid credentials from shared cache first
-    const credentials = await sharedManager.getValidCredentials(client);
-    client.setCredentials(credentials);
-    return client;
-  } catch (error: unknown) {
-    const rotatedAccount = await accountPool.rotateToNextAvailableAccount();
-    if (rotatedAccount) {
-      sharedManager.clearCache();
+  if (!options?.forceDeviceAuth) {
+    try {
+      await accountPool.rotateActiveAccountIfNeeded();
+      // Try to get valid credentials from shared cache first
       const credentials = await sharedManager.getValidCredentials(client);
       client.setCredentials(credentials);
       return client;
-    }
+    } catch (error: unknown) {
+      const rotatedAccount = await accountPool.rotateToNextAvailableAccount();
+      if (rotatedAccount) {
+        sharedManager.clearCache();
+        const credentials = await sharedManager.getValidCredentials(client);
+        client.setCredentials(credentials);
+        return client;
+      }
 
-    // Handle specific token manager errors
-    if (error instanceof TokenManagerError) {
-      switch (error.type) {
-        case TokenError.NO_REFRESH_TOKEN:
-          debugLogger.debug(
-            'No refresh token available, proceeding with device flow',
-          );
-          break;
-        case TokenError.REFRESH_FAILED:
-          debugLogger.debug(
-            'Token refresh failed, proceeding with device flow',
-          );
-          break;
-        case TokenError.NETWORK_ERROR:
-          debugLogger.warn(
-            'Network error during token refresh, trying device flow',
-          );
-          break;
-        default:
-          debugLogger.warn('Token manager error:', (error as Error).message);
+      // Handle specific token manager errors
+      if (error instanceof TokenManagerError) {
+        switch (error.type) {
+          case TokenError.NO_REFRESH_TOKEN:
+            debugLogger.debug(
+              'No refresh token available, proceeding with device flow',
+            );
+            break;
+          case TokenError.REFRESH_FAILED:
+            debugLogger.debug(
+              'Token refresh failed, proceeding with device flow',
+            );
+            break;
+          case TokenError.NETWORK_ERROR:
+            debugLogger.warn(
+              'Network error during token refresh, trying device flow',
+            );
+            break;
+          default:
+            debugLogger.warn('Token manager error:', (error as Error).message);
+        }
       }
     }
+  }
 
-    if (options?.requireCachedCredentials) {
-      throw new Error(
-        'Qwen OAuth credentials expired. Please use /auth to re-authenticate with qwen-oauth.',
+  if (options?.requireCachedCredentials) {
+    throw new Error(
+      'Qwen OAuth credentials expired. Please use /auth to re-authenticate with qwen-oauth.',
+    );
+  }
+
+  // If we couldn't obtain valid credentials via SharedTokenManager, or an
+  // explicit re-auth was requested, fall back to interactive device auth.
+  const result = await authWithQwenDeviceFlow(client, config);
+  if (!result.success) {
+    // Only emit timeout event if the failure reason is actually timeout
+    // Other error types (401, 429, etc.) have already emitted their specific events
+    if (result.reason === 'timeout') {
+      qwenOAuth2Events.emit(
+        QwenOAuth2Event.AuthProgress,
+        'timeout',
+        'Authentication timed out. Please try again or select a different authentication method.',
       );
     }
 
-    // If we couldn't obtain valid credentials via SharedTokenManager, fall back to
-    // interactive device authorization (unless explicitly forbidden above).
-    const result = await authWithQwenDeviceFlow(client, config);
-    if (!result.success) {
-      // Only emit timeout event if the failure reason is actually timeout
-      // Other error types (401, 429, etc.) have already emitted their specific events
-      if (result.reason === 'timeout') {
-        qwenOAuth2Events.emit(
-          QwenOAuth2Event.AuthProgress,
-          'timeout',
-          'Authentication timed out. Please try again or select a different authentication method.',
-        );
-      }
+    // Use detailed error message if available, otherwise use default based on reason
+    const errorMessage =
+      result.message ||
+      (() => {
+        switch (result.reason) {
+          case 'timeout':
+            return 'Qwen OAuth authentication timed out';
+          case 'cancelled':
+            return 'Qwen OAuth authentication was cancelled by user';
+          case 'rate_limit':
+            return 'Too many request for Qwen OAuth authentication, please try again later.';
+          case 'error':
+          default:
+            return 'Qwen OAuth authentication failed';
+        }
+      })();
 
-      // Use detailed error message if available, otherwise use default based on reason
-      const errorMessage =
-        result.message ||
-        (() => {
-          switch (result.reason) {
-            case 'timeout':
-              return 'Qwen OAuth authentication timed out';
-            case 'cancelled':
-              return 'Qwen OAuth authentication was cancelled by user';
-            case 'rate_limit':
-              return 'Too many request for Qwen OAuth authentication, please try again later.';
-            case 'error':
-            default:
-              return 'Qwen OAuth authentication failed';
-          }
-        })();
-
-      throw new Error(errorMessage);
-    }
-
-    return client;
+    throw new Error(errorMessage);
   }
+
+  return client;
 }
 
 /**
